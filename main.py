@@ -2,12 +2,17 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import requests
 import re
 import sqlite3
+#import psycopg2
+#from sqlalchemy import create_engine
+import sqlalchemy
+import csv
+import datetime
 
 
-##helper functions
+## Helper functions
+## DF processing
 def replace_lv_characters_with_eng(latvian_text):
     latin_equivalents = {'ā': 'a', 'Ā': 'A', 'č': 'c', 'Č': 'C', 'ē': 'e', 'Ē': 'E', 'ī': 'i', 'Ī': 'I', 'ķ': 'k',
                          'Ķ': 'K', 'ļ': 'l', 'Ļ': 'L', 'ņ': 'n', 'Ņ': 'N', 'š': 's', 'Š': 'S',
@@ -18,7 +23,7 @@ def replace_lv_characters_with_eng(latvian_text):
 
 
 def split_district_and_street_address_into_2_strings(s):
-    match = re.search(r'[A-Za-z][^A-Z]*', s)
+    match = re.search(r'[A-Za-z][^A-Z0-9]*', s)
     if s[:3] == 'VEF':
         s1 = 'vef'
     elif s[:21] == 'Sampeteris-Pleskodale':
@@ -41,10 +46,13 @@ def process_df_columns(df):
     df[['district', 'street_address']] = df['adress_latin'].apply(
         split_district_and_street_address_into_2_strings).apply(pd.Series)
     df['link'] = 'https://www.ss.lv/' + df['link']
+    timestamp = datetime.datetime.now()
+    df['extr_time'] = timestamp
 
     return df
 
 
+## html parsing
 def parse_single_url_html_and_save_data_to_df(input_url, print_data=False):
     response = requests.get(input_url)
 
@@ -121,8 +129,57 @@ def get_all_eligible_urls_to_parse(url_base='https://www.ss.lv/lv/real-estate/fl
     return urls
 
 
-def create_sql_table():
-    conn = sqlite3.connect("local_db.db")
+## connecting, writing & reading to DB
+def read_creds_from_csv(csv_file_name='db_creds.csv'):
+    with open(csv_file_name, 'r') as f:
+        reader = csv.DictReader(f)
+        credentials = next(reader)
+    return credentials
+
+
+def get_connection_to_db(use_psql=False):
+    if use_psql:
+        creds = read_creds_from_csv()
+        db_name, user, password, host, port = creds['db_name'], creds['user'], creds['password'], creds['host'], creds['port']
+        conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+        #conn_str = f"postgresql://{creds['user']}:{creds['password']}@{creds['host']}:{creds['port']}/{creds['db_name']}"
+        engine = sqlalchemy.create_engine(conn_str)
+        conn = engine.connect()
+    else:
+        conn = sqlite3.connect("local_db.db")
+
+    return conn
+
+
+def write_df_to_sql_table(df, table_name='ss_flat_sales', use_psql=False, perform_printing=False):
+    #conn = sqlite3.connect(db_name)
+    conn = get_connection_to_db(use_psql=use_psql)
+    if perform_printing:
+        print('conn: ')
+        print(conn)
+        print('df: ')
+        print(df)
+
+    df.to_sql(name=table_name, con=conn, if_exists='replace', index=False)
+    if use_psql:
+        conn.commit()
+    conn.close()
+
+
+def query_sql_table_save_to_df(table_name='ss_flat_sales', use_psql=False):
+    conn = get_connection_to_db(use_psql=use_psql)
+    #conn = sqlite3.connect(db_name)
+    sql = 'select * from ' + table_name
+    if use_psql:
+        sql = sqlalchemy.text(sql)
+    #print(sql)
+    df = pd.read_sql_query(sql, conn)
+    conn.close()
+    return df
+
+
+def create_sql_table(use_psql=False):
+    conn = get_connection_to_db(use_psql=use_psql)
     cursor = conn.cursor()
 
     #'descr_txt', 'adress', 'room_cnt', 'm2', 'floor', 'proj_type',  # 'price_per_m2',
@@ -149,22 +206,8 @@ def create_sql_table():
     conn.close()
 
 
-def write_df_to_sql_table(df, db_name='local_db.db', table_name='ss_flat_sales'):
-    conn = sqlite3.connect(db_name)
-    df.to_sql(name=table_name, con=conn, if_exists='replace', index=False)
-    conn.close()
-
-
-def query_sql_table_save_to_df(db_name='local_db.db', table_name='ss_flat_sales'):
-    conn = sqlite3.connect(db_name)
-    sql = 'select * from ' + table_name
-    #print(sql)
-    df = pd.read_sql_query(sql, conn)
-    conn.close()
-    return df
-
-
-def ss_parser(perform_printing=False):
+## final function
+def ss_parser(perform_printing=False, use_psql=True):
     #url='https://www.ss.lv/msg/lv/real-estate/flats/riga/aplokciems/bnlekm.html'
     #url = 'https://www.ss.lv/lv/real-estate/flats/riga/imanta/sell/'
     #url = 'https://www.ss.lv/lv/real-estate/flats/riga/imanta/sell/page2.html'
@@ -188,11 +231,14 @@ def ss_parser(perform_printing=False):
     if perform_printing:
         print(whole_df.head(3))
         print(whole_df[['room_cnt', 'm2', 'price', 'price_per_m2']].head(3))
-        print('shape ' + str(whole_df.shape))
-    write_df_to_sql_table(whole_df, db_name='local_db.db', table_name='ss_flat_sales')
+        print('shape: ' + str(whole_df.shape))
+        print()
+    write_df_to_sql_table(whole_df, use_psql=use_psql, #False, #db_name='local_db.db',
+                          perform_printing=perform_printing,
+                          table_name='ss_flat_sales')
 
     if perform_printing:
-        t_df = query_sql_table_save_to_df()
+        t_df = query_sql_table_save_to_df(use_psql=use_psql)
         print(t_df)
 
 
@@ -204,3 +250,53 @@ def main():
 if __name__ == '__main__':
     main()
 
+#################
+# some testing
+def some_testing():
+    df2=query_sql_table_save_to_df(use_psql=False)
+    df2
+    df3=query_sql_table_save_to_df(use_psql=True)
+    df3
+
+    creds = read_creds_from_csv()
+    db_name, user, password, host, port = creds['db_name'], creds['user'], creds['password'], creds['host'], creds['port']
+    conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+    engine = sqlalchemy.create_engine(conn_str)#, dialect='postgresql')#, is_async=False)
+    ##conn = engine#.connect()
+
+    conn = engine.connect()
+    results = conn.execute(sqlalchemy.text('SELECT * FROM ss_flat_sales')).fetchall()
+    results
+    #conn.close()
+
+    metadata = sqlalchemy.MetaData()
+    test_table = sqlalchemy.Table('test_table', metadata, autoload_with=engine)
+
+    # Insert data into the table
+    conn.execute(sqlalchemy.text("insert into test_table(id, s) values (4, 'inserted from Python')"))
+    conn.execute(test_table.insert().values(id=2, s='inserted from Python'))
+    conn.commit()
+    results2 = conn.execute(sqlalchemy.text('SELECT * FROM test_table')).fetchall()
+    results2
+    conn.close()
+
+    # Get current timestamp
+    timestamp = datetime.datetime.now()
+    timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Print timestamp
+    print(timestamp_str)
+
+    timestamp = datetime.datetime.now()
+
+    t_data = {
+        'name': ['Alice', 'Bob', 'Charlie', 'David'],
+        'age': [25, 30, 35, 40],
+        'city': ['New York', 'Los Angeles', 'Chicago', 'Houston']
+    }
+
+    # create a dataframe from the dictionary
+    df = pd.DataFrame(t_data)
+    df['extr_time'] = timestamp
+    # display the dataframe
+    print(df)

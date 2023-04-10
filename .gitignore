@@ -1,2 +1,5 @@
 *.db
 .idea
+.db_creds.csv
+*.csv
+*.ppk
