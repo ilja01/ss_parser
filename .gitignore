@@ -3,3 +3,4 @@
 .db_creds.csv
 *.csv
 *.ppk
+ec2-user@*

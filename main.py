@@ -9,7 +9,7 @@ import sqlite3
 import sqlalchemy
 import csv
 import datetime
-
+import os
 
 ## Helper functions
 ## DF processing
@@ -131,7 +131,9 @@ def get_all_eligible_urls_to_parse(url_base='https://www.ss.lv/lv/real-estate/fl
 
 ## connecting, writing & reading to DB
 def read_creds_from_csv(csv_file_name='db_creds.csv'):
-    with open(csv_file_name, 'r') as f:
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    csv_file_path = os.path.join(script_path, csv_file_name)
+    with open(csv_file_path, 'r') as f:
         reader = csv.DictReader(f)
         credentials = next(reader)
     return credentials
