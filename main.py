@@ -245,7 +245,13 @@ def ss_parser(perform_printing=False, use_psql=True):
         print(whole_df[['room_cnt', 'm2', 'price', 'price_per_m2']].head(3))
         print('shape: ' + str(whole_df.shape))
         print()
-    write_df_to_sql_table(whole_df, use_psql=use_psql, #False, #db_name='local_db.db',
+
+    existing_df = query_sql_table_save_to_df(use_psql=True)
+    combined_df = pd.concat([existing_df, whole_df], sort=False)
+    #combined_df = combined_df.sort_values('extr_time')
+    combined_df = combined_df.drop_duplicates('ad_id', keep='first')
+
+    write_df_to_sql_table(combined_df, use_psql=use_psql, #False, #db_name='local_db.db',
                           perform_printing=perform_printing,
                           table_name='ss_flat_sales')
 
