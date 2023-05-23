@@ -10,6 +10,8 @@ import sqlalchemy
 import csv
 import datetime
 import os
+from telegram import Bot
+import asyncio
 
 ## Helper functions
 ## DF processing
@@ -208,6 +210,14 @@ def create_sql_table(use_psql=False):
     conn.close()
 
 
+## telegram
+async def telegram_bot_send_text(text_message='hello world!'):
+    creds = read_creds_from_csv(csv_file_name='telegram_creds.csv')
+    bot_token, chat_id = creds['bot_token'], creds['chat_id']
+    bot = Bot(token=bot_token)
+    await bot.send_message(chat_id=chat_id, text=text_message)
+
+
 ## final function
 def ss_parser(perform_printing=False, use_psql=True):
     #url='https://www.ss.lv/msg/lv/real-estate/flats/riga/aplokciems/bnlekm.html'
@@ -238,6 +248,8 @@ def ss_parser(perform_printing=False, use_psql=True):
     write_df_to_sql_table(whole_df, use_psql=use_psql, #False, #db_name='local_db.db',
                           perform_printing=perform_printing,
                           table_name='ss_flat_sales')
+
+    asyncio.run(telegram_bot_send_text(text_message='ss flat data load to db completed!'))
 
     if perform_printing:
         t_df = query_sql_table_save_to_df(use_psql=use_psql)
