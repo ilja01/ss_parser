@@ -11,6 +11,7 @@ import csv
 import datetime
 import os
 from telegram import Bot
+#from telegram.constants import ParseMode
 import asyncio
 
 ## Helper functions
@@ -50,8 +51,16 @@ def process_df_columns(df):
     df['link'] = 'https://www.ss.lv/' + df['link']
     timestamp = datetime.datetime.now()
     df['extr_time'] = timestamp
-
     return df
+
+
+def prep_fresh_data_df(df):
+    time_threshold = datetime.datetime.now() - datetime.timedelta(hours=20)
+    fresh_set = df[(df['extr_time'] >= time_threshold) & (df['proj_type']=='Jaun.')]
+    fresh_set = fresh_set.sort_values('price_per_m2', ascending=True)
+    fresh_set = fresh_set.reset_index()
+    fresh_set['n'] = fresh_set.index + 1
+    return fresh_set
 
 
 ## html parsing
@@ -170,7 +179,7 @@ def write_df_to_sql_table(df, table_name='ss_flat_sales', use_psql=False, perfor
     conn.close()
 
 
-def query_sql_table_save_to_df(table_name='ss_flat_sales', use_psql=False):
+def query_sql_table_save_to_df(table_name='ss_flat_sales', use_psql=True):
     conn = get_connection_to_db(use_psql=use_psql)
     #conn = sqlite3.connect(db_name)
     sql = 'select * from ' + table_name
@@ -218,34 +227,33 @@ async def telegram_bot_send_text(text_message='hello world!'):
     await bot.send_message(chat_id=chat_id, text=text_message)
 
 
+def print_df_via_telegram_bot(fresh_set):
+    asyncio.run(telegram_bot_send_text('new offers:'))
+    fresh_set['m2_price'] = round(fresh_set['price_per_m2'], 0).astype(int)
+    fresh_set['room_cnt'] = round(fresh_set['room_cnt'], 0).astype(int)
+    cols = ['n', 'price_raw', 'm2', 'room_cnt', 'm2_price']
+    df_text1 = fresh_set[cols].to_string(index=False)
+    asyncio.run(telegram_bot_send_text(df_text1))
+
+    fresh_set['full_address'] = fresh_set['district'] + '; ' + fresh_set['street_address']
+    df_text2 = fresh_set[['n', 'full_address']].to_string(index=False, header=True, justify='left')
+    asyncio.run(telegram_bot_send_text(df_text2))
+
+    df_text3 = fresh_set[['n', 'link']].to_string(index=False, header=False)
+    asyncio.run(telegram_bot_send_text(df_text3))
+
+
 ## final function
 def ss_parser(perform_printing=False, use_psql=True):
-    #url='https://www.ss.lv/msg/lv/real-estate/flats/riga/aplokciems/bnlekm.html'
-    #url = 'https://www.ss.lv/lv/real-estate/flats/riga/imanta/sell/'
-    #url = 'https://www.ss.lv/lv/real-estate/flats/riga/imanta/sell/page2.html'
-    #url = 'https://www.ss.lv/lv/real-estate/flats/riga/aplokciems/sell/'
-    #url = 'https://www.ss.lv/lv/real-estate/flats/riga/all/sell/'
-    #url = 'https://www.ss.lv/lv/real-estate/flats/riga/centre/sell/'
-    url = 'https://www.ss.lv/lv/real-estate/flats/riga/all/sell/page1'
     url_base = 'https://www.ss.lv/lv/real-estate/flats/riga/all/sell/'
 
-
     all_urls = get_all_eligible_urls_to_parse(url_base=url_base)#, hard_coded_last_url_page_number=2, do_printing=True)#, do_printing=True, hard_coded_last_url_page_number=5)
-    if perform_printing: print(all_urls)
     all_dfs = []
     for single_url in all_urls:
-        if perform_printing: print(single_url)
         df = parse_single_url_html_and_save_data_to_df(single_url, print_data=False)
         all_dfs.append(df)
-        #print(df)
-    #print(all_dfs)
-    whole_df = pd.concat(all_dfs)
-    if perform_printing:
-        print(whole_df.head(3))
-        print(whole_df[['room_cnt', 'm2', 'price', 'price_per_m2']].head(3))
-        print('shape: ' + str(whole_df.shape))
-        print()
 
+    whole_df = pd.concat(all_dfs)
     existing_df = query_sql_table_save_to_df(use_psql=True)
     combined_df = pd.concat([existing_df, whole_df], sort=False)
     #combined_df = combined_df.sort_values('extr_time')
@@ -255,11 +263,14 @@ def ss_parser(perform_printing=False, use_psql=True):
                           perform_printing=perform_printing,
                           table_name='ss_flat_sales')
 
-    asyncio.run(telegram_bot_send_text(text_message='ss flat data load to db completed!'))
+    #asyncio.run(telegram_bot_send_text('ss flat data load to db completed!'))
 
-    if perform_printing:
-        t_df = query_sql_table_save_to_df(use_psql=use_psql)
-        print(t_df)
+    fresh_set = prep_fresh_data_df(combined_df)
+
+    if fresh_set.shape[0] >= 1:
+        print_df_via_telegram_bot(fresh_set)
+    else:
+        asyncio.run(telegram_bot_send_text('no new offers!'))
 
 
 ## main
