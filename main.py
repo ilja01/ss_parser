@@ -224,7 +224,7 @@ async def telegram_bot_send_text(text_message='hello world!'):
     creds = read_creds_from_csv(csv_file_name='telegram_creds.csv')
     bot_token, chat_id, chat_id2 = creds['bot_token'], creds['chat_id'], creds['chat_id2']
     bot = Bot(token=bot_token)
-    await bot.send_message(chat_id=chat_id, text=text_message)
+    #await bot.send_message(chat_id=chat_id, text=text_message)
     await bot.send_message(chat_id=chat_id2, text=text_message)
 
 
