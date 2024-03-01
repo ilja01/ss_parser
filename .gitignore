@@ -1,6 +1,9 @@
 *.db
 .idea
 .db_creds.csv
+.db_creds_v0.csv
 *.csv
 *.ppk
 ec2-user@*
+ss_flat_sales_*_backup.csv
+ss_flat_sales_*.pkl
