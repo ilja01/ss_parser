@@ -258,7 +258,7 @@ def ss_parser(perform_printing=False, use_psql=True):
     existing_df = query_sql_table_save_to_df(use_psql=True)
     combined_df = pd.concat([existing_df, whole_df], sort=False)
     #combined_df = combined_df.sort_values('extr_time')
-    combined_df = combined_df.drop_duplicates('ad_id', keep='first')
+    combined_df = combined_df.drop_duplicates(subset=['ad_id','price','link','m2','room_cnt','floor','proj_type','adress_latin'], keep='first')
 
     write_df_to_sql_table(combined_df, use_psql=use_psql, #False, #db_name='local_db.db',
                           perform_printing=perform_printing,
