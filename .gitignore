@@ -7,3 +7,6 @@
 ec2-user@*
 ss_flat_sales_*_backup.csv
 ss_flat_sales_*.pkl
+_pycache_
+.pytest_cache
+venv
