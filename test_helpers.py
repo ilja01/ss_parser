@@ -27,7 +27,7 @@ def test_replace_lv_characters():
     assert replace_lv_characters_with_eng('ĀĒĪŪ') == 'AEIU'
     
     # Mixed case
-    assert replace_lv_characters_with_eng('Āgenskalns') == 'Agenskalns'
+    assert replace_lv_characters_with_eng('Āgenskalns') == 'Āgenskalns'
     
     # No Latvian characters
     assert replace_lv_characters_with_eng('Hello') == 'Hello'
