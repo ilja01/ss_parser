@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: python:3.9-slim
+      image: python:3.9
 
     steps:
     - name: Check out repository
