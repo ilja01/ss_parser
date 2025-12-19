@@ -4,13 +4,14 @@ import datetime
 from main import (
     replace_lv_characters_with_eng,
     split_district_and_street_address_into_2_strings,
-    process_df_columns,
+    process_flats_df_columns,
+    process_cars_df_columns,
     prep_fresh_data_df
 )
 
 # Test data fixtures
 @pytest.fixture
-def sample_df():
+def sample_flats_df():
     return pd.DataFrame({
         'price_raw': ['€123,456', '€78,900', '€250,000'],
         'room_cnt': ['2', '3', '4'],
@@ -18,6 +19,15 @@ def sample_df():
         'adress': ['CentrsBrivibas iela 1', 'VEFBrivibas gatve 214', 'ĀgenskalnsMārupes iela 10'],
         'link': ['link1', 'link2', 'link3'],
         'proj_type': ['Jaun.', 'Spec.', 'Jaun.']
+    })
+
+@pytest.fixture
+def sample_cars_df():
+    return pd.DataFrame({
+        'price_raw': ['26,000  €', '15,550  €', '17,900  €'],
+        'mileage_raw': ['150 tūkst.', '80', '-'],
+        'year': ['2018', '2020', '2015'],
+        'link': ['link1', 'link2', 'link3']
     })
 
 
@@ -61,8 +71,8 @@ def test_split_district_and_street_address():
     assert street == 'margrietas 16'
    
 
-def test_process_df_columns(sample_df):
-    processed_df = process_df_columns(sample_df)
+def test_process_flats_df_columns(sample_flats_df):
+    processed_df = process_flats_df_columns(sample_flats_df)
     
     # Test numeric conversions
     assert processed_df['price'].dtype in ['int64', 'float64']
@@ -84,6 +94,27 @@ def test_process_df_columns(sample_df):
     # Test district/street splitting
     assert processed_df['district'].iloc[0] == 'centrs'
     assert 'brivibas iela 1' in processed_df['street_address'].iloc[0]
+    
+    # Test link modification
+    assert all(processed_df['link'].str.startswith('https://www.ss.lv/'))
+    
+    # Test timestamp addition
+    assert isinstance(processed_df['extr_time'].iloc[0], datetime.datetime)
+
+
+def test_process_cars_df_columns(sample_cars_df):
+    processed_df = process_cars_df_columns(sample_cars_df)
+    
+    # Test price extraction
+    assert processed_df['price'].iloc[0] == 26000
+    
+    # Test mileage format
+    assert processed_df['mileage'].iloc[0] == '150k'
+    assert processed_df['mileage'].iloc[1] == '80'
+    assert processed_df['mileage'].iloc[2] == '-'
+    
+    # Test year conversion
+    assert processed_df['year'].iloc[0] == 2018
     
     # Test link modification
     assert all(processed_df['link'].str.startswith('https://www.ss.lv/'))

@@ -14,6 +14,22 @@ from telegram import Bot
 #from telegram.constants import ParseMode
 import asyncio
 
+## config
+CONFIG = {
+    'flats': {
+        'url_base': 'https://www.ss.lv/lv/real-estate/flats/riga/all/sell/',
+        'table': 'ss_flat_sales',
+        'columns': ['descr_txt', 'adress', 'room_cnt', 'm2', 'floor', 'proj_type', 'price_raw', 'link', 'ad_id'],
+        'dedup_cols': ['ad_id', 'price', 'link', 'm2', 'room_cnt', 'floor', 'proj_type', 'adress_latin'],
+    },
+    'cars': {
+        'url_base': 'https://www.ss.lv/lv/transport/cars/tesla/model-3/sell/',
+        'table': 'ss_car_sales',
+        'columns': ['descr_txt', 'year', 'mileage_raw', 'price_raw', 'link', 'ad_id'],
+        'dedup_cols': ['ad_id', 'price', 'link', 'year', 'mileage'],
+    },
+}
+
 ## Helper functions
 ## DF processing
 def replace_lv_characters_with_eng(latvian_text):
@@ -39,7 +55,7 @@ def split_district_and_street_address_into_2_strings(s):
     return s1, s2
 
 
-def process_df_columns(df):
+def process_flats_df_columns(df):
     num_cols = ['room_cnt', 'm2', 'price']
 
     df['price'] = df['price_raw'].str.replace(',', '').str.extract('(\d+)')
@@ -54,28 +70,36 @@ def process_df_columns(df):
     return df
 
 
-def prep_fresh_data_df(df):
+def process_cars_df_columns(df):
+    df['price'] = df['price_raw'].str.replace(',', '').str.extract('(\d+)').astype(float)
+    df['mileage'] = df['mileage_raw'].str.replace(' tūkst.', 'k')
+    df['year'] = pd.to_numeric(df['year'], errors='coerce')
+    df['link'] = 'https://www.ss.lv/' + df['link']
+    df['extr_time'] = datetime.datetime.now()
+    return df
+
+
+def prep_fresh_data_df(df, category='flats'):
     time_threshold = datetime.datetime.now() - datetime.timedelta(hours=20)
-    fresh_set = df[(df['extr_time'] >= time_threshold) & (df['proj_type']=='Jaun.')]
-    fresh_set = fresh_set.sort_values('price_per_m2', ascending=True)
+    fresh_set = df[(df['extr_time'] >= time_threshold)]
+    if category == 'flats':
+        fresh_set = fresh_set[(fresh_set['proj_type']=='Jaun.')]
+        fresh_set = fresh_set.sort_values('price_per_m2', ascending=True)
+    else:        
+        fresh_set = fresh_set.sort_values('price', ascending=True)
     fresh_set = fresh_set.reset_index()
     fresh_set['n'] = fresh_set.index + 1
     return fresh_set
 
 
 ## html parsing
-def parse_single_url_html_and_save_data_to_df(input_url, print_data=False):
+def parse_single_url_html_and_save_data_to_df(input_url, category='flats', print_data=False):
     response = requests.get(input_url)
-
-    # Parse the HTML content of the website
     soup = BeautifulSoup(response.content, 'html.parser')
 
     data = []
     for row in soup.find_all('tr'):
         cols = row.find_all('td')
-        # link = cols.get('href')
-        # links = row.find_all(class_='msg2')
-        # links = [link.get('href') for link in links]
         link_class = row.find('a', class_='am')
         link = link_class['href'] if link_class else None
         ad_id = link_class['id'] if link_class else None
@@ -85,21 +109,17 @@ def parse_single_url_html_and_save_data_to_df(input_url, print_data=False):
         cols.append(ad_id)
         if cols[0] == '' and cols[1] == '':
             data.append(cols[2:])
-        # print(cols)
-        # print(links)
 
     if print_data:
         for row in data:
             print('length:', len(row))
             print(row)
 
-    # if specific district is chosen then we have price per m2 provided.
-    # If all Riga districts are chosen, then price per m2 is not provided; however, in address district is also showns
-    col_names = ['descr_txt', 'adress', 'room_cnt', 'm2', 'floor', 'proj_type', #'price_per_m2',
-                 'price_raw', 'link', 'ad_id']
-    # print(data)
-    df = pd.DataFrame(data, columns=col_names)
-    df = process_df_columns(df)
+    df = pd.DataFrame(data, columns=CONFIG[category]['columns'])
+    if category == 'flats':
+        df = process_flats_df_columns(df)
+    else:
+        df = process_cars_df_columns(df)
 
     return df
 
@@ -114,26 +134,21 @@ def find_last_url(url='https://www.ss.lv/lv/real-estate/flats/riga/all/sell/page
 
 
 def get_all_eligible_urls_to_parse(url_base='https://www.ss.lv/lv/real-estate/flats/riga/all/sell/',
-                                   do_printing=False,
-                                   hard_coded_last_url_page_number=None):
-
-    if hard_coded_last_url_page_number is None:
-        url_last = find_last_url(url_base)
-        url_last_page_number = int(re.search(r'page(\d+)', url_last).group(1))
-    else:
-        url_last = None
-        url_last_page_number = hard_coded_last_url_page_number
-
+                                   do_printing=False
+                                   ):
+    
+    url_last_page_number = 1    
+    url_last = find_last_url(url_base)
+    if url_last is not None:
+        url_last_page_number = int(re.search(r'page(\d+)', url_last).group(1))        
+    
     urls = []
-    if url_last is None and hard_coded_last_url_page_number is None:
-        urls.append(url_base)
-    else:
-        if do_printing: print('url_last_page_number:', url_last_page_number)
+    if do_printing: print('url_last_page_number:', url_last_page_number)
 
-        for i in range(1, url_last_page_number+1):
-            url_i = url_base+'page'+str(i)+'.html'
-            if do_printing: print('url_i:', url_i)
-            urls.append(url_i)
+    for i in range(1, url_last_page_number+1):
+        url_i = url_base + 'page' + str(i) + '.html'
+        if do_printing: print('url_i:', url_i)
+        urls.append(url_i)
 
     if do_printing: print(urls)
 
@@ -191,144 +206,85 @@ def query_sql_table_save_to_df(table_name='ss_flat_sales', use_psql=True):
     return df
 
 
-def create_sql_table(use_psql=False):
-    conn = get_connection_to_db(use_psql=use_psql)
-    cursor = conn.cursor()
-
-    #'descr_txt', 'adress', 'room_cnt', 'm2', 'floor', 'proj_type',  # 'price_per_m2',
-    #'price_raw', 'link', 'ad_id',     'price_per_m2'
-
-    cursor.execute("""
-    CREATE TABLE ss_flat_sales (
-        id INTEGER PRIMARY KEY,
-        descr_txt TEXT,
-        adress TEXT,
-        room_cnt INTEGER,
-        m2 REAL,
-        floor TEXT,
-        proj_type TEXT,
-        price_raw TEXT,
-        link TEXT,
-        ad_id TEXT,
-        price REAL,
-        price_per_m2 REAL        
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
 
 ## telegram
-async def telegram_bot_send_text(text_message='hello world!'):
+async def telegram_bot_send_text(text_message='hello world!', category='flats'):
     creds = read_creds_from_csv(csv_file_name='telegram_creds.csv')
-    bot_token, chat_id, chat_id2 = creds['bot_token'], creds['chat_id'], creds['chat_id2']
+    bot_token, chat_id2, chat_id3 = creds['bot_token'], creds['chat_id2'], creds['chat_id3']
     bot = Bot(token=bot_token)
-    #await bot.send_message(chat_id=chat_id, text=text_message)
-    await bot.send_message(chat_id=chat_id2, text=text_message)
+    if category == 'flats':
+        chat_id = chat_id2
+    else:
+        chat_id = chat_id3
+    await bot.send_message(chat_id=chat_id, text=text_message)
 
 
-def print_df_via_telegram_bot(fresh_set):
-    asyncio.run(telegram_bot_send_text('new offers:'))
-    fresh_set['m2_price'] = round(fresh_set['price_per_m2'], 0).astype(int)
-    fresh_set['room_cnt'] = round(fresh_set['room_cnt'], 0).astype(int)
-    cols = ['n', 'price_raw', 'm2', 'room_cnt', 'm2_price']
-    df_text1 = fresh_set[cols].to_string(index=False)
-    asyncio.run(telegram_bot_send_text(df_text1))
+def print_df_via_telegram_bot(fresh_set, category='flats'):
+    asyncio.run(telegram_bot_send_text('new offers:', category=category))
 
-    fresh_set['full_address'] = fresh_set['district'] + '; ' + fresh_set['street_address']
-    df_text2 = fresh_set[['n', 'full_address']].to_string(index=False, header=True, justify='left')
-    asyncio.run(telegram_bot_send_text(df_text2))
+    if category == 'flats':
+        fresh_set['m2_price'] = round(fresh_set['price_per_m2'], 0).astype(int)
+        fresh_set['room_cnt'] = round(fresh_set['room_cnt'], 0).astype(int)
+        cols = ['n', 'price_raw', 'm2', 'room_cnt', 'm2_price']
+        df_text1 = fresh_set[cols].to_string(index=False)
+        asyncio.run(telegram_bot_send_text(df_text1, category=category))
 
-    df_text3 = fresh_set[['n', 'link']].to_string(index=False, header=False)
-    asyncio.run(telegram_bot_send_text(df_text3))
+        fresh_set['full_address'] = fresh_set['district'] + '; ' + fresh_set['street_address']
+        df_text2 = fresh_set[['n', 'full_address']].to_string(index=False, header=True, justify='left')
+        asyncio.run(telegram_bot_send_text(df_text2, category=category))
+
+        df_text3 = fresh_set[['n', 'link']].to_string(index=False, header=False)
+        asyncio.run(telegram_bot_send_text(df_text3, category=category))
+
+    else:
+        cols = ['n', 'price_raw', 'year', 'mileage']
+        df_text1 = fresh_set[cols].to_string(index=False)
+        asyncio.run(telegram_bot_send_text(df_text1, category=category))
+
+        df_text2 = fresh_set[['n', 'link']].to_string(index=False, header=False)
+        asyncio.run(telegram_bot_send_text(df_text2, category=category))
 
 
 ## final function
-def ss_parser(perform_printing=False, use_psql=True):
-    url_base = 'https://www.ss.lv/lv/real-estate/flats/riga/all/sell/'
+def ss_parser(category='flats', perform_printing=False, use_psql=True):
+    url_base = CONFIG[category]['url_base']
+    table_name = CONFIG[category]['table']
+    dedup_cols = CONFIG[category]['dedup_cols']
 
-    all_urls = get_all_eligible_urls_to_parse(url_base=url_base)#, hard_coded_last_url_page_number=2, do_printing=True)#, do_printing=True, hard_coded_last_url_page_number=5)
+    all_urls = get_all_eligible_urls_to_parse(url_base=url_base)
     all_dfs = []
     for single_url in all_urls:
-        df = parse_single_url_html_and_save_data_to_df(single_url, print_data=False)
+        df = parse_single_url_html_and_save_data_to_df(single_url, category=category, print_data=False)
         all_dfs.append(df)
 
     whole_df = pd.concat(all_dfs)
-    existing_df = query_sql_table_save_to_df(use_psql=True)
+    existing_df = query_sql_table_save_to_df(table_name=table_name, use_psql=use_psql)
     combined_df = pd.concat([existing_df, whole_df], sort=False)
-    #combined_df = combined_df.sort_values('extr_time')
-    combined_df = combined_df.drop_duplicates(subset=['ad_id','price','link','m2','room_cnt','floor','proj_type','adress_latin'], keep='first')
+    
+    combined_df = combined_df.drop_duplicates(subset=dedup_cols, keep='first')
 
-    write_df_to_sql_table(combined_df, use_psql=use_psql, #False, #db_name='local_db.db',
+    write_df_to_sql_table(combined_df, use_psql=use_psql, 
                           perform_printing=perform_printing,
-                          table_name='ss_flat_sales')
+                          table_name=table_name)
 
     #asyncio.run(telegram_bot_send_text('ss flat data load to db completed!'))
 
-    fresh_set = prep_fresh_data_df(combined_df)
+    fresh_set = prep_fresh_data_df(combined_df, category=category)
 
     if fresh_set.shape[0] >= 1:
-        print_df_via_telegram_bot(fresh_set)
+        print_df_via_telegram_bot(fresh_set, category=category)
     else:
-        asyncio.run(telegram_bot_send_text('no new offers!'))
+        asyncio.run(telegram_bot_send_text('no new offers!', category=category))
 
 
 ## main
 def main():
-    ss_parser(perform_printing=False)
+    import sys
+    category = sys.argv[1] if len(sys.argv) > 1 else 'flats'
+    ss_parser(category=category)
 
 
 if __name__ == '__main__':
     main()
 
-#################
-# some testing
-def some_testing():
-    df2=query_sql_table_save_to_df(use_psql=False)
-    df2
-    df3=query_sql_table_save_to_df(use_psql=True)
-    df3
 
-    creds = read_creds_from_csv()
-    db_name, user, password, host, port = creds['db_name'], creds['user'], creds['password'], creds['host'], creds['port']
-    conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
-    engine = sqlalchemy.create_engine(conn_str)#, dialect='postgresql')#, is_async=False)
-    ##conn = engine#.connect()
-
-    conn = engine.connect()
-    results = conn.execute(sqlalchemy.text('SELECT * FROM ss_flat_sales')).fetchall()
-    results
-    #conn.close()
-
-    metadata = sqlalchemy.MetaData()
-    test_table = sqlalchemy.Table('test_table', metadata, autoload_with=engine)
-
-    # Insert data into the table
-    conn.execute(sqlalchemy.text("insert into test_table(id, s) values (4, 'inserted from Python')"))
-    conn.execute(test_table.insert().values(id=2, s='inserted from Python'))
-    conn.commit()
-    results2 = conn.execute(sqlalchemy.text('SELECT * FROM test_table')).fetchall()
-    results2
-    conn.close()
-
-    # Get current timestamp
-    timestamp = datetime.datetime.now()
-    timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-
-    # Print timestamp
-    print(timestamp_str)
-
-    timestamp = datetime.datetime.now()
-
-    t_data = {
-        'name': ['Alice', 'Bob', 'Charlie', 'David'],
-        'age': [25, 30, 35, 40],
-        'city': ['New York', 'Los Angeles', 'Chicago', 'Houston']
-    }
-
-    # create a dataframe from the dictionary
-    df = pd.DataFrame(t_data)
-    df['extr_time'] = timestamp
-    # display the dataframe
-    print(df)
