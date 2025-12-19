@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 80
 
 # Run script.py when the container launches
-CMD ["python", "./main.py"]
+ENTRYPOINT ["python", "./main.py"]
